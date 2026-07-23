@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: fct_payments
+    description: >
+      One row per payment with its final resolved status, and had_failed_attempt_prior_24h — whether a
+      failed payment on the same reservation resolved in the 24h before this payment started.
+    columns:
+      - name: payment_key
+        description: Resolved payment identity. THE grain of this table.
+        tests:
+          # Mart grain guarantee — one row per payment. If broken, revenue double-counts. error (default).
+          - unique
+          - not_null
+
+      - name: reservation_id
+        description: Reservation the payment belongs to.
+        tests:
+          - not_null
+
+      - name: final_status
+        description: Status of the payment's last interaction.
+        tests:
+          - not_null
+          # Guards the revenue filter (final_status = 'succeeded'): an unseen status would silently drop.
+          - accepted_values:
+              values: ['pending', 'processing', 'succeeded', 'failed', 'refunded']
+
+      - name: amount_usd
+        description: Payment amount (NUMERIC).
+        tests:
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+
+      - name: is_unresolved
+        description: TRUE if the payment never received a provider id (died at initiation).
+        tests:
+          - not_null
+
+      - name: had_failed_attempt_prior_24h
+        description: TRUE if a failed payment on the same reservation resolved in the prior 24h.
+        tests:
+          - not_null
+          - accepted_values:
+              values: [true, false]

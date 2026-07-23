@@ -1,0 +1,95 @@
+version: 2
+
+# One tests/docs file for the whole staging layer (dbt keys tests by the `name:` inside, not by
+# filename). Every test carries a why-downstream comment explaining its impact, not just the check.
+# Severity is set deliberately: error = breaks revenue / stops the pipeline; warn = data-quality signal
+# that can legitimately fire in normal operation.
+
+models:
+  - name: stg_payments
+    description: One row per payment-provider interaction. Grain = payment_event_id.
+    columns:
+
+      - name: payment_event_id
+        description: Row grain key (raw `id`).
+        tests:
+          # GRAIN GUARANTEE. If broken, the merge unique_key collapses or duplicates rows and EVERY
+          # downstream revenue number double-counts. Silent and catastrophic -> error.
+          - unique:
+              config:
+                severity: error
+          - not_null:
+              config:
+                severity: error
+
+      - name: reservation_id
+        description: Reservation the payment belongs to.
+        tests:
+          # An orphan payment can't join to bookings/companies -> silently drops out of company-level
+          # revenue. Not a grain break, but a silent understatement -> error.
+          - not_null:
+              config:
+                severity: error
+          # Referential integrity for the mart's company enrichment. WARN, not error: a payment can
+          # legitimately arrive BEFORE its reservation appears in a snapshot (or after it dropped), so
+          # a failure here is expected noise, not a defect. (Seed rows res_104 / res_107 trip this.)
+          - relationships:
+              to: ref('stg_reservations')
+              field: reservation_id
+              config:
+                severity: warn
+
+      - name: status
+        description: Interaction status.
+        tests:
+          # An unknown status silently falls out of CASE/filter logic in fct_payments -> understated
+          # revenue with NO error raised. accepted_values turns a silent gap into a loud failure -> error.
+          - accepted_values:
+              values: ['pending', 'processing', 'succeeded', 'failed', 'refunded']
+              config:
+                severity: error
+
+      - name: action
+        description: Lifecycle stage of the interaction.
+        tests:
+          # Same silent-fallthrough argument, for the final-status derivation logic -> error.
+          - accepted_values:
+              values: ['initiation', 'callback', 'resolution']
+              config:
+                severity: error
+
+      - name: amount_usd
+        description: Interaction amount (NUMERIC).
+        tests:
+          # Negative / garbage amounts corrupt every SUM-based revenue metric. >= 0 guard -> error.
+          - dbt_utils.accepted_range:
+              min_value: 0
+              inclusive: true
+              config:
+                severity: error
+
+      - name: payment_id
+        description: Provider payment id; NULL only at initiation.
+        tests:
+          # BUSINESS-RULE CONTRACT: by callback/resolution the provider MUST have assigned an id.
+          # A NULL past initiation signals provider-integration breakage. WARN, not error: it's a
+          # data-quality signal to investigate, not a pipeline-stopping grain break.
+          - not_null:
+              config:
+                where: "action != 'initiation'"
+                severity: warn
+
+  - name: stg_reservations
+    description: Discrete status-transition records derived from daily snapshots (one row per transition).
+    columns:
+      - name: reservation_id
+        description: Reservation identity. NOT unique here — one row per transition, not per reservation.
+        tests:
+          - not_null
+      - name: new_status
+        description: Status after the transition.
+        tests:
+          - not_null
+          # Unknown reservation states would break funnel / cancellation analysis downstream.
+          - accepted_values:
+              values: ['pending', 'approved', 'completed', 'pending_cancellation', 'cancelled']
