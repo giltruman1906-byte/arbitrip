@@ -1,0 +1,28 @@
+version: 2
+
+# One sources file for the whole project — only the staging layer reads raw tables,
+# so source() is only ever resolved here. Marts read staging via ref().
+sources:
+  - name: raw
+    description: >
+      Raw ingested tables. In production these are landed by the backend / a managed
+      connector; here they are simulated by seeds (see seeds/_seeds.yml) so the project
+      is runnable. The staging models read them via source() so the SQL matches production.
+    schema: raw   # seeds land in the `raw` dataset (see generate_schema_name macro)
+    tables:
+      - name: raw_payments
+        description: Payment-provider interactions; one payment spans 2-3 rows (initiation -> callback -> resolution).
+        columns:
+          - name: id
+            description: Unique per interaction, always populated. The row grain key.
+          - name: payment_id
+            description: Provider-assigned payment identity; NULL until the provider responds at callback.
+      - name: raw_reservations
+        description: >
+          Daily snapshot of active reservations — overwritten nightly in production (no history).
+          Here we retain multiple snapshot_dates so transitions can be reconstructed downstream.
+        columns:
+          - name: reservation_id
+            description: Reservation identity.
+          - name: snapshot_date
+            description: The calendar day this snapshot row represents.

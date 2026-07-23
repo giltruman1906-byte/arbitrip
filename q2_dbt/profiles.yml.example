@@ -1,0 +1,15 @@
+# Copy to ~/.dbt/profiles.yml and fill in your values. NEVER commit the real file or the keyfile.
+arbitrip_takehome:
+  target: dev
+  outputs:
+    dev:
+      type: bigquery
+      method: service-account
+      keyfile: /absolute/path/to/service-account.json   # keep OUT of the repo
+      project: your-gcp-project-id
+      dataset: your_base_dataset      # generate_schema_name override routes seeds -> `raw`, models -> `analytics`
+      threads: 4
+      location: US
+      priority: interactive
+      job_execution_timeout_seconds: 300
+      job_retries: 1

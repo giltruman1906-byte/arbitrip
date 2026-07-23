@@ -1,0 +1,17 @@
+reservation_id,status,company_id,traveler_id,amount_usd,snapshot_date
+res_100,pending,comp_A,trav_1,500.00,2026-07-01
+res_100,approved,comp_A,trav_1,500.00,2026-07-02
+res_100,completed,comp_A,trav_1,500.00,2026-07-03
+res_101,approved,comp_A,trav_2,800.00,2026-07-02
+res_101,approved,comp_A,trav_2,800.00,2026-07-03
+res_101,completed,comp_A,trav_2,800.00,2026-07-04
+res_102,approved,comp_B,trav_3,300.00,2026-07-03
+res_102,approved,comp_B,trav_3,300.00,2026-07-04
+res_103,pending,comp_B,trav_4,450.00,2026-07-05
+res_105,approved,comp_C,trav_5,900.00,2026-07-08
+res_105,completed,comp_C,trav_5,900.00,2026-07-09
+res_106,approved,comp_C,trav_6,1200.00,2026-07-10
+res_108,approved,comp_D,trav_7,350.00,2026-07-12
+res_200,approved,comp_D,trav_8,700.00,2026-07-06
+res_200,pending_cancellation,comp_D,trav_8,700.00,2026-07-07
+res_200,cancelled,comp_D,trav_8,700.00,2026-07-08

@@ -1,0 +1,22 @@
+name: 'arbitrip_takehome'
+version: '1.0.0'
+config-version: 2
+
+profile: 'arbitrip_takehome'   # resolved from ~/.dbt/profiles.yml (see profiles.yml.example)
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+
+models:
+  arbitrip_takehome:
+    staging:
+      +materialized: view       # stg_payments overrides this to incremental in its own config block
+      +schema: analytics
+    marts:
+      +materialized: table
+      +schema: analytics
+
+seeds:
+  arbitrip_takehome:
+    +schema: raw                # seeds land in the `raw` dataset, mirroring "given raw tables in BigQuery"

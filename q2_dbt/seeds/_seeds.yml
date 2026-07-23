@@ -1,0 +1,51 @@
+version: 2
+
+# Seed properties. These CSVs SIMULATE the two raw BigQuery tables the assignment
+# says we are "given". In production they are real ingested tables (backend/CDC);
+# here they are seeds so the project is runnable end-to-end. `sources.yml` declares
+# them as sources and the staging models read them via source() — so the model SQL
+# reads exactly as it would in production. Run order: `dbt seed` before `dbt run`.
+#
+# column_types are pinned explicitly rather than left to CSV inference:
+#  - amount_usd stays FLOAT64 here (raw fidelity) — it is cast to NUMERIC in staging,
+#    where money belongs; casting at the raw layer would hide the source's real type.
+#  - payment_id is STRING so the empty field on the unresolved payment loads as intended.
+#    NOTE: dbt-bigquery may load an empty CSV string as '' rather than NULL — staging
+#    applies NULLIF(payment_id, '') defensively so "unassigned" is a true NULL downstream.
+#  - id / *_at / snapshot_date pinned so keys, timestamps and the snapshot date are typed,
+#    not guessed (a mis-inferred timestamp would silently break the incremental predicate).
+
+seeds:
+  - name: raw_payments
+    description: >
+      Simulated raw payment-provider interactions. One payment spans 2-3 rows
+      (initiation -> callback -> resolution). `id` is unique per row; `payment_id`
+      is provider-assigned and back-filled onto all rows of a payment once known,
+      so it is NULL only for payments that never resolved.
+    config:
+      column_types:
+        id: STRING
+        payment_id: STRING
+        reservation_id: STRING
+        action: STRING
+        status: STRING
+        amount_usd: FLOAT64
+        payment_method: STRING
+        payment_policy: STRING
+        created_at: TIMESTAMP
+        updated_at: TIMESTAMP
+
+  - name: raw_reservations
+    description: >
+      Simulated daily snapshot of active reservations. Every night the real table
+      is overwritten with current state (no history). Here we accumulate multiple
+      snapshot_dates so transitions can be reconstructed — see stg_reservations and
+      snapshot_limitations.md for why this reconstruction is lossy.
+    config:
+      column_types:
+        reservation_id: STRING
+        status: STRING
+        company_id: STRING
+        traveler_id: STRING
+        amount_usd: FLOAT64
+        snapshot_date: DATE
