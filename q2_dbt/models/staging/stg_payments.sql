@@ -1,9 +1,11 @@
 {{
   config(
     materialized='incremental',
-    incremental_strategy='merge',        -- source rows MUTATE in place (initiation->callback->resolution);
-                                          -- append would re-insert the mutated row and duplicate the grain,
-                                          -- double-counting a payment across statuses. merge upserts on the key.
+    incremental_strategy='merge',        -- IDEMPOTENT DEDUP, not update. Events are immutable facts, but the
+                                          -- same interaction can arrive more than once (at-least-once delivery
+                                          -- + the 3-day lookback re-scans already-loaded rows). append would
+                                          -- INSERT those duplicates and break the grain; merge collapses them
+                                          -- onto the existing key. (Alternative: append + qualify row_number().)
     unique_key='payment_event_id',        -- `id` is the ONLY always-populated unique column; payment_id is
                                           -- NULL at initiation, so it cannot serve as the merge key.
     partition_by={
@@ -22,9 +24,13 @@
 -- Volume: ~500K rows/month (~6M/year) -> a full refresh every run is wasteful; incremental is required.
 --
 -- Two risks drove the config above:
--- (1) Rows mutate in place as a payment progresses. An APPEND strategy would re-insert a row on
---     every mutation -> several rows per payment_event_id -> grain broken -> revenue double-counted.
---     => incremental_strategy='merge' with unique_key=payment_event_id.
+-- (1) Each payment produces 2-3 SEPARATE interaction rows (initiation/callback/resolution), each with its
+--     own immutable payment_event_id. We are NOT updating rows. The risk is DUPLICATION: the same event can
+--     arrive more than once (at-least-once delivery + the 3-day lookback below re-scans loaded rows). APPEND
+--     would re-INSERT those -> several rows per payment_event_id -> grain broken -> revenue double-counted.
+--     => incremental_strategy='merge' with unique_key=payment_event_id gives idempotent dedup: a repeat
+--     event lands on its existing key instead of duplicating. (Alternative: append-only staging + dedup
+--     downstream via qualify row_number() over(partition by payment_event_id ...). Merge front-loads it.)
 -- (2) A strict `updated_at > MAX(updated_at)` boundary SILENTLY loses rows:
 --       - updates landing mid-run (between reading MAX and the merge),
 --       - clock skew / backfills stamping past timestamps,
@@ -62,7 +68,8 @@ renamed as (
         payment_method,
         payment_policy,
         created_at,                                         -- immutable: when the interaction was first created
-        updated_at                                          -- mutates in place as the row progresses
+        updated_at                                          -- last time this interaction row was written/corrected;
+                                                            -- drives the incremental predicate below
     from source
 )
 

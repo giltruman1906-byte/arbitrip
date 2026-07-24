@@ -16,6 +16,11 @@ with payments as (
     select * from {{ ref('stg_payments') }}
 ),
 
+reservations as (
+    select * 
+    from {{ ref('stg_reservations') }}
+),
+
 keyed as (
     select
         *,
@@ -63,7 +68,7 @@ reservation_company as (
     select
         reservation_id,
         any_value(company_id) as company_id
-    from {{ ref('stg_reservations') }}
+    from reservations
     group by reservation_id
 ),
 

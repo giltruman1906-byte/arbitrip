@@ -80,16 +80,38 @@ models:
                 severity: warn
 
   - name: stg_reservations
-    description: Discrete status-transition records derived from daily snapshots (one row per transition).
+    description: >
+      SCD Type-2 status history derived from daily snapshots — one row per status INTERVAL, with
+      [valid_from, valid_to) and an is_current flag. Grain = one row per (reservation_id, valid_from).
     columns:
       - name: reservation_id
         description: Reservation identity. NOT unique here — one row per transition, not per reservation.
         tests:
           - not_null
       - name: new_status
-        description: Status after the transition.
+        description: Status the reservation entered at valid_from (the status held during this interval).
         tests:
           - not_null
           # Unknown reservation states would break funnel / cancellation analysis downstream.
           - accepted_values:
               values: ['pending', 'approved', 'completed', 'pending_cancellation', 'cancelled']
+      - name: valid_from
+        description: Day this status was first observed (interval start). DATE precision only.
+        tests:
+          - not_null
+      - name: valid_to
+        description: >
+          Day the next transition was observed (interval end, exclusive). NULL = current status.
+          Intentionally nullable, so no not_null test.
+      - name: is_current
+        description: TRUE for the reservation's latest known status (valid_to IS NULL).
+        tests:
+          - not_null
+    # SCD-2 grain guarantee: at most one interval can START per reservation per day. If this ever fails,
+    # LEAD would compute overlapping/zero-length intervals. (Upstream, the source composite-uniqueness
+    # test on (reservation_id, snapshot_date) already makes duplicate same-day starts impossible.)
+    tests:
+      - dbt_utils.unique_combination_of_columns:
+          combination_of_columns:
+            - reservation_id
+            - valid_from

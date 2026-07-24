@@ -32,7 +32,8 @@ transitions as (
         reservation_id,
         previous_status,
         status        as new_status,
-        snapshot_date as transition_date,   -- DATE precision only: we know the DAY of a change, never the time
+        snapshot_date as valid_from,        -- the DAY this status was first observed. DATE precision only:
+                                            -- we know the day of a change, never the time.
         company_id,
         traveler_id,
         amount_usd
@@ -42,6 +43,32 @@ transitions as (
     --   (NULL IS DISTINCT FROM 'pending')     = TRUE  -> first snapshot emitted as "first observed"
     --   ('approved' IS DISTINCT FROM 'approved') = FALSE -> a repeated same-status day is suppressed
     where status is distinct from previous_status
+),
+
+-- SCD TYPE-2 framing: turn discrete transitions into state INTERVALS [valid_from, valid_to).
+-- valid_to = the day the NEXT transition was observed = the day this status ENDED. Computed with LEAD
+-- over the already-filtered transitions (NOT lag over raw snapshots — that would give "yesterday", not
+-- "when the next status began"). NULL valid_to = no later transition = the reservation's CURRENT state.
+-- Interval is half-open: on valid_to the reservation is already in the next status, so
+-- date_diff(valid_to, valid_from) = days spent in this status.
+scd2 as (
+    select
+        reservation_id,
+        previous_status,
+        new_status,
+        valid_from,
+        lead(valid_from) over (
+            partition by reservation_id
+            order by valid_from
+        ) as valid_to,
+        (lead(valid_from) over (
+            partition by reservation_id
+            order by valid_from
+        ) is null) as is_current,          -- TRUE = the reservation's latest known status
+        company_id,
+        traveler_id,
+        amount_usd
+    from transitions
 )
 
-select * from transitions
+select * from scd2

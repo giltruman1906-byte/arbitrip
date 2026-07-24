@@ -1,0 +1,113 @@
+version: 2
+
+# =====================================================================================================
+# SEMANTIC LAYER (MetricFlow) on fct_payments  —  the code form of semantic_layer.md.
+#
+# This file defines METRIC MEANINGS, not tables. Nothing here is materialised. BI tools (Tableau/Looker/
+# a notebook/a Slack bot) query these metric names via the dbt Semantic Layer, and MetricFlow COMPILES
+# the SQL from these definitions at query time. That is the whole anti-drift mechanism: "revenue" is
+# defined once here, and there is no way to ask for revenue except through this definition.
+#
+# Two objects:
+#   semantic_models: describe the table — its grain (entities), how you can slice it (dimensions), and
+#                    the raw things you can aggregate (measures).
+#   metrics:         the governed, named numbers analysts actually request. This is where the business
+#                    decisions ("revenue excludes refunds and failed attempts") are pinned down ONCE.
+#
+# Requires MetricFlow (dbt-core >= 1.6 / dbt Cloud). Sketch-level: I can defend every block, but I have
+# not run `mf query` against a live warehouse here — see semantic_layer.md for the reasoning write-up.
+# =====================================================================================================
+
+semantic_models:
+  - name: payments
+    description: One row per payment (final resolved status). Grain is guaranteed by fct_payments.
+    model: ref('fct_payments')
+
+    defaults:
+      # The default time axis for every metric below — so "revenue by month" needs no extra config.
+      # initiated_at = when the payment STARTED (the mart's business event time).
+      agg_time_dimension: initiated_at
+
+    # ENTITIES = the grain / join keys. `primary` declares "this table is one row per payment",
+    # which is what lets COUNT mean "distinct payments" and blocks accidental fan-out.
+    entities:
+      - name: payment
+        type: primary
+        expr: payment_key
+      - name: reservation          # foreign key — lets this metric set join to a reservation model later
+        type: foreign
+        expr: reservation_id
+
+    # DIMENSIONS = the legal ways to slice every metric. final_status is included specifically because
+    # the metric FILTERS below reference it — a filter can only use a declared dimension.
+    dimensions:
+      - name: initiated_at
+        type: time
+        type_params:
+          time_granularity: day
+      - name: company_id
+        type: categorical
+      - name: payment_policy       # pay_now vs pay_later (BNPL)
+        type: categorical
+      - name: payment_method
+        type: categorical
+      - name: final_status         # exposed so the revenue/failed filters can reference it
+        type: categorical
+
+    # MEASURES = raw aggregations, deliberately UNFILTERED. The business filter (what counts as revenue)
+    # lives on the METRIC, not here — so the same measure is reused by several metrics with different
+    # filters, and there is exactly one place the filter is decided.
+    measures:
+      - name: payment_amount
+        agg: sum
+        expr: amount_usd
+      - name: payments_made
+        agg: count
+        expr: payment_key
+
+metrics:
+  # THE governed definition of revenue. This single filter is the one place "what counts as revenue" is
+  # decided: succeeded only -> refunds, failed, and pending BNPL are all excluded by construction.
+  # Change this line in one reviewed PR and every BI surface updates together.
+  - name: total_revenue
+    label: "Total Revenue"
+    type: simple
+    type_params:
+      measure: payment_amount
+    filter: "{{ Dimension('payment__final_status') }} = 'succeeded'"
+
+  # Distinct payments (grain guaranteed by the primary entity), no status filter -> all attempts.
+  - name: payment_count
+    label: "Payment Count"
+    type: simple
+    type_params:
+      measure: payments_made
+
+  # Building block for failed_payment_rate. Same measure as payment_count, different filter -> the two
+  # can never disagree on what a "payment" is, because they share payments_made.
+  - name: failed_payment_count
+    label: "Failed Payment Count"
+    type: simple
+    type_params:
+      measure: payments_made
+    filter: "{{ Dimension('payment__final_status') }} = 'failed'"
+
+  # RATIO, not AVG(amount_usd). Defining it as revenue / count forces both halves to inherit the governed
+  # definitions above, so it cannot silently drift (wrong status filter, refunds left in, etc.).
+  # NOTE: numerator is succeeded-only revenue, denominator is ALL payments -> this reads as "revenue per
+  # payment attempt", matching semantic_layer.md. If the business wants "avg value of a SUCCESSFUL
+  # payment", I'd swap the denominator to a succeeded-scoped count — a one-line, reviewable change.
+  - name: avg_payment_value
+    label: "Average Payment Value"
+    type: ratio
+    type_params:
+      numerator: total_revenue
+      denominator: payment_count
+
+  # Reuses payment_count as the denominator, so the rate can never drift from the count metric.
+  - name: failed_payment_rate
+    label: "Failed Payment Rate"
+    type: ratio
+    type_params:
+      numerator: failed_payment_count
+      denominator: payment_count

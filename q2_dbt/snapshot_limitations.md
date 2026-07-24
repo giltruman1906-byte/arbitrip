@@ -11,9 +11,10 @@ not ground truth.** The reliable failure modes:
    reports `pending → completed`, or if it was created and completed the same day, only `completed`.
    A quick revert (`approved → pending → approved` in one day) looks like *no change at all*.
 
-2. **Precision is a date, never a time.** `transition_date` tells us the *day* a change was first
+2. **Precision is a date, never a time.** `valid_from` / `valid_to` tell us the *day* a change was first
    observed, not the moment. Any analysis needing hour-level timing (approval latency, SLA breaches,
-   time-to-pay) cannot be answered from this model — only "on which day."
+   time-to-pay) cannot be answered from this model — only "on which day." Likewise `date_diff(valid_to,
+   valid_from)` measures *observed* days in a status, not true elapsed time.
 
 3. **A missed or failed snapshot day fabricates adjacency.** `LAG` orders by whatever snapshots exist,
    not by the calendar. If the Tuesday snapshot fails to run, Monday and Wednesday become "consecutive"
@@ -32,6 +33,18 @@ not ground truth.** The reliable failure modes:
 and `IS DISTINCT FROM` emits it as a *"first observed"* transition rather than dropping it. That is
 deliberate — first observation is itself analytically useful — but it is an *observation event*, not a
 true status change, and should be read as such.
+
+## A note on retention (how the history is kept in production)
+
+The real source is **overwritten every night** — it only ever holds *one* day. So the accumulated
+multi-day history this model reads does not exist in the source; it has to be **captured**. In
+production that capture is a separate upstream layer: a nightly job (dbt's built-in `dbt snapshot`)
+copies each night's snapshot into a history table that only ever grows. `stg_reservations` then derives
+transitions on top of that retained history. Here the **seed simulates that already-captured history**
+(it keeps multiple `snapshot_date`s side by side) so this model can focus on the derivation, not the
+ingestion. Note the pipeline is two distinct jobs: **capture/retention** (accumulate snapshots) →
+**derivation** (this model). Importantly, even perfect nightly capture only yields *daily* granularity —
+it fixes *retention*, not the five gaps above, which are inherent to snapshotting once per day.
 
 ## The real fix (cross-reference to Q1)
 

@@ -8,15 +8,37 @@ sources:
       Raw ingested tables. In production these are landed by the backend / a managed
       connector; here they are simulated by seeds (see seeds/_seeds.yml) so the project
       is runnable. The staging models read them via source() so the SQL matches production.
-    schema: raw   # seeds land in the `raw` dataset (see generate_schema_name macro)
+    # In BigQuery, `database:` = GCP project and `schema:` = dataset.
+    # `database:` is omitted so dbt inherits the project from profiles.yml — correct here because
+    # the simulated raw seeds live in the same project as the models. In production, raw usually
+    # lands in a SEPARATE ingestion project, at which point database: arbitrip-raw-prod (or similar)
+    # must be set explicitly, or dbt would look for the table in the analytics project and fail.
+    schema: raw   # the BigQuery dataset the raw tables live in (see generate_schema_name macro)
+    # Source-layer tests assert the RAW feed is well-formed BEFORE any dbt logic runs — so a failure
+    # here means "the upstream feed/ingestion is broken", vs a model test failure meaning "my SQL is
+    # wrong". Run them with: dbt test --select source:raw. (In production I'd also add a freshness:
+    # block on each table to catch a snapshot/feed that silently stopped landing.)
     tables:
       - name: raw_payments
         description: Payment-provider interactions; one payment spans 2-3 rows (initiation -> callback -> resolution).
         columns:
           - name: id
             description: Unique per interaction, always populated. The row grain key.
+            tests:
+              # Grain contract at the SOURCE. If the raw feed ever ships a duplicate/blank id, every
+              # downstream count is already wrong before staging even runs -> catch it at the door.
+              - unique
+              - not_null
           - name: payment_id
             description: Provider-assigned payment identity; NULL until the provider responds at callback.
+            # NO not_null here: payment_id is legitimately NULL/'' at initiation. Testing it would fail
+            # by design. The conditional not_null (action != 'initiation') lives on the STAGING model,
+            # where the business rule actually applies.
+          - name: reservation_id
+            description: Reservation the interaction belongs to; always populated.
+            tests:
+              # Every payment interaction must belong to a reservation. A NULL means orphaned revenue.
+              - not_null
       - name: raw_reservations
         description: >
           Daily snapshot of active reservations — overwritten nightly in production (no history).
@@ -24,5 +46,19 @@ sources:
         columns:
           - name: reservation_id
             description: Reservation identity.
+            tests:
+              # Snapshot rows must identify their reservation, else the transition derivation can't group.
+              - not_null
           - name: snapshot_date
             description: The calendar day this snapshot row represents.
+            tests:
+              - not_null
+        # GRAIN of the snapshot = one row per (reservation_id, snapshot_date). This is the test that
+        # matters most: if a day's snapshot ever contained a reservation twice, the window-function
+        # transition logic in stg_reservations would see phantom transitions. dbt_utils enforces the
+        # composite grain that a plain `unique` on one column can't express.
+        tests:
+          - dbt_utils.unique_combination_of_columns:
+              combination_of_columns:
+                - reservation_id
+                - snapshot_date

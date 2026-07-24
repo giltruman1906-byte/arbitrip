@@ -4,7 +4,8 @@ A semantic layer defines each metric **once**, in one governed place, so every d
 Tableau, Looker, a Python notebook, a Slack bot — inherits the *same* definition instead of each
 re-deriving it in its own SQL. Below are the metrics on top of `fct_payments`, expressed as a
 MetricFlow-style spec (the exact syntax matters less than the discipline: aggregation + grain + a
-single filter set, version-controlled).
+single filter set, version-controlled). The same metrics are also expressed as runnable dbt/MetricFlow
+objects in `models/marts/_semantic_models.yml` — this doc is the reasoning, that file is the code form.
 
 **Base table:** `fct_payments` — grain: **one row per payment**.
 **Shared dimensions:** `initiated_at` (→ day/week/month), `company_id`, `payment_policy`, `payment_method`.
