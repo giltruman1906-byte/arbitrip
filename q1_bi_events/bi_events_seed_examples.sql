@@ -1,14 +1,13 @@
 -- bi_events — runnable example data + verification queries.
 -- Supporting material, not a required deliverable — the point is to make the Q1.3 claims executable
 -- rather than just asserted. Run bi_events_schema.sql first, then this file, then the queries at the bottom.
---
+
 -- Section A: the 5 documented events from example_events.md
 -- Section B: a few edge-case rows (a replayed duplicate, a missing transition) so the verification
 --            queries have something real to catch
 -- Section C: the verification queries
---
--- Dialect: BigQuery (GoogleSQL)
 
+-- Dialect: BigQuery (GoogleSQL)
 
 -- Section A — the five documented events.
 -- All one traveler journey (usr_204 / corr_A1) except the BNPL event, which belongs to a separate

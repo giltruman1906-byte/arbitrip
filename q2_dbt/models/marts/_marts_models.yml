@@ -9,7 +9,7 @@ models:
       - name: payment_key
         description: Resolved payment identity. THE grain of this table.
         tests:
-          # Mart grain guarantee — one row per payment. If broken, revenue double-counts. error (default).
+          # Mart grain guarantee — one row per payment. if broken, revenue double-counts. error (default).
           - unique
           - not_null
 
@@ -22,7 +22,7 @@ models:
         description: Status of the payment's last interaction.
         tests:
           - not_null
-          # Guards the revenue filter (final_status = 'succeeded'): an unseen status would silently drop.
+          # Guards the revenue filter (final_status = 'succeeded') an unseen status would silently drop.
           - accepted_values:
               values: ['pending', 'processing', 'succeeded', 'failed', 'refunded']
 
@@ -42,7 +42,7 @@ models:
         description: TRUE if a failed payment on the same reservation resolved in the prior 24h.
         tests:
           - not_null
-          # quote: false -> renders as `in (true, false)`; a BOOL vs quoted-string IN errors on BigQuery
+          # quote: false - renders as in (true, false) a bool vs quoted-string in errors on bq
           - accepted_values:
               values: [true, false]
               quote: false

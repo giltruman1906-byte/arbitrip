@@ -1,7 +1,7 @@
 version: 2
 
-# Staging-layer tests. dbt keys these by the name: below, not the filename.
-# Each has a short note on why it matters downstream. error = breaks revenue or the pipeline;
+# staging-layer tests. dbt keys these by the name: below, not the filename.
+# each has a short note on why it matters downstream. error = breaks revenue or the pipeline;
 # warn = something worth a look that can still happen in normal operation.
 
 models:

@@ -1,6 +1,6 @@
 version: 2
 
-# MetricFlow semantic model + metrics over fct_payments. Metrics are defined once here and
+# metricFlow semantic model + metrics over fct_payments. Metrics are defined once here and
 # compiled at query time, so every BI tool gets the same "revenue" number instead of re-deriving
 # it. Sketch only — not run against a live warehouse. Full write-up in semantic_layer.md.
 
@@ -10,11 +10,11 @@ semantic_models:
     model: ref('fct_payments')
 
     defaults:
-      agg_time_dimension: initiated_at   # default time axis, so "revenue by month" just works
+      agg_time_dimension: initiated_at   # default time axis, so revenue by month just works
 
     entities:
       - name: payment
-        type: primary                    # one row per payment -> count means distinct payments
+        type: primary                    # one row per payment - count means distinct payments
         expr: payment_key
       - name: reservation                # fk, to join a reservation model later
         type: foreign

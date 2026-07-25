@@ -1,8 +1,8 @@
 {{ config(materialized='view') }}
 
--- Build status transitions out of a daily snapshot, shaped as SCD Type-2 intervals.
--- In prod the source is overwritten every night (no history); here we assume snapshots were kept.
--- This is reconstruction from daily photos, not ground truth — see snapshot_limitations.md.
+-- build status transitions out of a daily snapshot, shaped as SCD Type-2 intervals.
+-- in prod the source is overwritten every night (no history); here we assume snapshots were kept.
+-- this is reconstruction from daily photos, not ground truth — see snapshot_limitations.md.
 
 with source as (
     select * from {{ source('raw', 'raw_reservations') }}

@@ -7,13 +7,13 @@ sources:
       Raw ingested tables. In prod these are landed by the backend or a managed connector; here
       they're simulated by seeds (seeds/_seeds.yml) so the project runs. Staging reads them via
       source() so the SQL matches prod.
-    # In BigQuery, database: = GCP project and schema: = dataset. database: is omitted so dbt uses
+    # in bq, database: = GCP project and schema: = dataset. database: is omitted so dbt uses
     # the project from profiles.yml — fine here since the seeds live in the same project. In prod
     # raw usually lands in a separate project, so you'd set database: explicitly or dbt won't find it.
     schema: raw
-    # These tests check the raw feed is well-formed before any model runs, so a failure here means
+    # these tests check the raw feed is well-formed before any model runs, so a failure here means
     # "the upstream feed is broken", not "my SQL is wrong". Run with: dbt test --select source:raw.
-    # In prod I'd also add a freshness: block to catch a feed that silently stopped landing.
+    # in prod I'd also add a freshness: block to catch a feed that silently stopped landing.
     tables:
       - name: raw_payments
         description: Payment-provider interactions; one payment spans 2-3 rows (initiation -> callback -> resolution).
