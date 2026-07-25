@@ -42,5 +42,7 @@ models:
         description: TRUE if a failed payment on the same reservation resolved in the prior 24h.
         tests:
           - not_null
+          # quote: false -> renders as `in (true, false)`; a BOOL vs quoted-string IN errors on BigQuery
           - accepted_values:
               values: [true, false]
+              quote: false

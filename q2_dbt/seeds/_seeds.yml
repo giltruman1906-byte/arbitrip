@@ -1,27 +1,22 @@
 version: 2
 
-# Seed properties. These CSVs SIMULATE the two raw BigQuery tables the assignment
-# says we are "given". In production they are real ingested tables (backend/CDC);
-# here they are seeds so the project is runnable end-to-end. `sources.yml` declares
-# them as sources and the staging models read them via source() — so the model SQL
-# reads exactly as it would in production. Run order: `dbt seed` before `dbt run`.
+# Seeds standing in for the two raw BigQuery tables. In prod they're real ingested tables; here
+# they're CSVs so the project runs end to end. sources.yml points staging at them via source(),
+# so the model SQL reads the same as it would in prod. Run dbt seed before dbt run.
 #
-# column_types are pinned explicitly rather than left to CSV inference:
-#  - amount_usd stays FLOAT64 here (raw fidelity) — it is cast to NUMERIC in staging,
-#    where money belongs; casting at the raw layer would hide the source's real type.
-#  - payment_id is STRING so the empty field on the unresolved payment loads as intended.
-#    NOTE: dbt-bigquery may load an empty CSV string as '' rather than NULL — staging
-#    applies NULLIF(payment_id, '') defensively so "unassigned" is a true NULL downstream.
-#  - id / *_at / snapshot_date pinned so keys, timestamps and the snapshot date are typed,
-#    not guessed (a mis-inferred timestamp would silently break the incremental predicate).
+# Types are pinned rather than left to CSV inference:
+#  - amount_usd stays FLOAT64 (raw fidelity); staging casts it to NUMERIC, where money belongs.
+#  - payment_id is STRING so the empty field on the unresolved payment loads right. dbt-bigquery may
+#    load an empty CSV value as '' not NULL, so staging applies NULLIF(payment_id, '').
+#  - id / *_at / snapshot_date pinned so keys and timestamps aren't guessed (a mis-typed timestamp
+#    would quietly break the incremental predicate).
 
 seeds:
   - name: raw_payments
     description: >
-      Simulated raw payment-provider interactions. One payment spans 2-3 rows
-      (initiation -> callback -> resolution). `id` is unique per row; `payment_id`
-      is provider-assigned and back-filled onto all rows of a payment once known,
-      so it is NULL only for payments that never resolved.
+      Simulated raw payment interactions. One payment spans 2-3 rows (initiation -> callback ->
+      resolution). id is unique per row; payment_id is provider-assigned and back-filled onto all
+      rows of a payment once known, so it's NULL only for payments that never resolved.
     config:
       column_types:
         id: STRING
@@ -37,10 +32,9 @@ seeds:
 
   - name: raw_reservations
     description: >
-      Simulated daily snapshot of active reservations. Every night the real table
-      is overwritten with current state (no history). Here we accumulate multiple
-      snapshot_dates so transitions can be reconstructed — see stg_reservations and
-      snapshot_limitations.md for why this reconstruction is lossy.
+      Simulated daily snapshot of active reservations. In prod the real table is overwritten nightly
+      (no history). Here we keep several snapshot_dates so transitions can be reconstructed — see
+      stg_reservations and snapshot_limitations.md for why that reconstruction is lossy.
     config:
       column_types:
         reservation_id: STRING

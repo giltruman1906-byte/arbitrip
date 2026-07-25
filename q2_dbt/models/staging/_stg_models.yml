@@ -1,9 +1,8 @@
 version: 2
 
-# One tests/docs file for the whole staging layer (dbt keys tests by the `name:` inside, not by
-# filename). Every test carries a why-downstream comment explaining its impact, not just the check.
-# Severity is set deliberately: error = breaks revenue / stops the pipeline; warn = data-quality signal
-# that can legitimately fire in normal operation.
+# Staging-layer tests. dbt keys these by the name: below, not the filename.
+# Each has a short note on why it matters downstream. error = breaks revenue or the pipeline;
+# warn = something worth a look that can still happen in normal operation.
 
 models:
   - name: stg_payments
@@ -13,8 +12,7 @@ models:
       - name: payment_event_id
         description: Row grain key (raw `id`).
         tests:
-          # GRAIN GUARANTEE. If broken, the merge unique_key collapses or duplicates rows and EVERY
-          # downstream revenue number double-counts. Silent and catastrophic -> error.
+          # grain key — a dupe here double-counts revenue everywhere downstream
           - unique:
               config:
                 severity: error
@@ -25,14 +23,12 @@ models:
       - name: reservation_id
         description: Reservation the payment belongs to.
         tests:
-          # An orphan payment can't join to bookings/companies -> silently drops out of company-level
-          # revenue. Not a grain break, but a silent understatement -> error.
+          # orphan payment can't roll up to a company, so it goes missing from company revenue
           - not_null:
               config:
                 severity: error
-          # Referential integrity for the mart's company enrichment. WARN, not error: a payment can
-          # legitimately arrive BEFORE its reservation appears in a snapshot (or after it dropped), so
-          # a failure here is expected noise, not a defect. (Seed rows res_104 / res_107 trip this.)
+          # warn, not error: a payment can arrive before its reservation shows up in a snapshot
+          # (or after it dropped). res_104 / res_107 trip this on purpose.
           - relationships:
               to: ref('stg_reservations')
               field: reservation_id
@@ -42,8 +38,7 @@ models:
       - name: status
         description: Interaction status.
         tests:
-          # An unknown status silently falls out of CASE/filter logic in fct_payments -> understated
-          # revenue with NO error raised. accepted_values turns a silent gap into a loud failure -> error.
+          # an unknown status just falls out of the fct_payments filters -> understated revenue, no error
           - accepted_values:
               values: ['pending', 'processing', 'succeeded', 'failed', 'refunded']
               config:
@@ -52,7 +47,7 @@ models:
       - name: action
         description: Lifecycle stage of the interaction.
         tests:
-          # Same silent-fallthrough argument, for the final-status derivation logic -> error.
+          # same idea; this one protects the final-status logic
           - accepted_values:
               values: ['initiation', 'callback', 'resolution']
               config:
@@ -61,7 +56,7 @@ models:
       - name: amount_usd
         description: Interaction amount (NUMERIC).
         tests:
-          # Negative / garbage amounts corrupt every SUM-based revenue metric. >= 0 guard -> error.
+          # negative / junk amounts corrupt every revenue sum
           - dbt_utils.accepted_range:
               min_value: 0
               inclusive: true
@@ -71,9 +66,8 @@ models:
       - name: payment_id
         description: Provider payment id; NULL only at initiation.
         tests:
-          # BUSINESS-RULE CONTRACT: by callback/resolution the provider MUST have assigned an id.
-          # A NULL past initiation signals provider-integration breakage. WARN, not error: it's a
-          # data-quality signal to investigate, not a pipeline-stopping grain break.
+          # by callback the provider should have assigned an id. a null past initiation means the
+          # integration is off — worth investigating, not pipeline-stopping, so warn.
           - not_null:
               config:
                 where: "action != 'initiation'"
@@ -81,35 +75,39 @@ models:
 
   - name: stg_reservations
     description: >
-      SCD Type-2 status history derived from daily snapshots — one row per status INTERVAL, with
-      [valid_from, valid_to) and an is_current flag. Grain = one row per (reservation_id, valid_from).
+      SCD Type-2 status history from daily snapshots — one row per status interval
+      [valid_from, valid_to) with an is_current flag. Grain = (reservation_id, valid_from).
     columns:
       - name: reservation_id
-        description: Reservation identity. NOT unique here — one row per transition, not per reservation.
+        description: Reservation identity. Not unique here — one row per transition.
         tests:
           - not_null
       - name: new_status
-        description: Status the reservation entered at valid_from (the status held during this interval).
+        description: Status the reservation entered at valid_from.
         tests:
           - not_null
-          # Unknown reservation states would break funnel / cancellation analysis downstream.
+          # unknown states would break funnel / cancellation analysis
           - accepted_values:
               values: ['pending', 'approved', 'completed', 'pending_cancellation', 'cancelled']
       - name: valid_from
-        description: Day this status was first observed (interval start). DATE precision only.
+        description: Day this status was first observed (interval start). Date precision only.
         tests:
           - not_null
       - name: valid_to
         description: >
-          Day the next transition was observed (interval end, exclusive). NULL = current status.
-          Intentionally nullable, so no not_null test.
+          Day the next transition was observed (interval end, exclusive). NULL = current status,
+          so it's intentionally nullable — no not_null test.
       - name: is_current
-        description: TRUE for the reservation's latest known status (valid_to IS NULL).
+        description: TRUE for the reservation's latest known status.
         tests:
           - not_null
-    # SCD-2 grain guarantee: at most one interval can START per reservation per day. If this ever fails,
-    # LEAD would compute overlapping/zero-length intervals. (Upstream, the source composite-uniqueness
-    # test on (reservation_id, snapshot_date) already makes duplicate same-day starts impossible.)
+          # quote: false so it renders as `in (true, false)` — a BOOL column can't be compared
+          # to quoted strings on BigQuery, that would error
+          - accepted_values:
+              values: [true, false]
+              quote: false
+    # one interval can start per reservation per day. if this fails, LEAD builds overlapping
+    # intervals. the source test on (reservation_id, snapshot_date) already prevents same-day dupes.
     tests:
       - dbt_utils.unique_combination_of_columns:
           combination_of_columns:

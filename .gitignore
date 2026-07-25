@@ -1,9 +1,3 @@
-# Internal planning / working docs — not part of the submission
-CLAUDE.md
-arbitrip_takehome_plan.md
-decisions_log.md
-q2_dbt/q2_spec.md
-
 # Credentials — never commit
 profiles.yml
 **/service-account*.json

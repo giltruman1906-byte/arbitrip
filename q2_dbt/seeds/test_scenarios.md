@@ -25,7 +25,7 @@ random rows would only dilute that.
 | **Standalone failure** | `pay_J` | pe_070, pe_071 | A failed payment with no follow-up — a payment can end `failed` with no successful retry. | 1 row, `final_status = failed` |
 
 **Referential-integrity cases (feed the `relationships` WARN test in 2.4):**
-`res_104` (pay_G) and `res_107` (pay_J) deliberately have **no** row in `raw_reservations`.
+`res_104` (the unresolved `pe_040`) and `res_107` (pay_J) deliberately have **no** row in `raw_reservations`.
 A payment can land before the reservation snapshot exists (or after it dropped), so the
 relationship test is `warn`, not `error` — these two rows are why.
 

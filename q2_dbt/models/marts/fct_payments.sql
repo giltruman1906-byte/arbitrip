@@ -1,39 +1,32 @@
 {{ config(materialized='table') }}
 
--- fct_payments — ONE ROW PER PAYMENT (not per provider interaction), with its final resolved status
--- and a flag for a prior failed attempt on the same reservation within 24h.
--- ================================================================================================
--- PAYMENT-ENTITY RESOLUTION
--- A payment spans 2-3 stg rows. The source back-fills payment_id onto ALL rows of a payment once the
--- provider assigns it (rows mutate in place), so grouping on payment_id resolves any payment that ever
--- reached callback. A payment that died at initiation never received a payment_id -> it stays its own
--- "unresolved" payment (flagged is_unresolved). We deliberately do NOT link the initiation row by
--- reservation_id + timing: that is over-engineering here, and back-fill already solves it. (This rests
--- on an assumption about source write-behaviour, documented here as an explicit assumption.)
--- ================================================================================================
+-- One row per payment, with its final status and a flag for a failed attempt on the same
+-- reservation in the 24h before this one started.
+-- A payment spans 2-3 stg rows. The source back-fills payment_id onto all of them once the
+-- provider assigns it, so grouping on payment_id collapses them. A payment that dies at
+-- initiation never gets an id, so it keeps its own "unresolved" key. (This assumes the source
+-- back-fills — noted rather than trying to link the initiation row by reservation_id + timing.)
 
 with payments as (
     select * from {{ ref('stg_payments') }}
 ),
 
 reservations as (
-    select * 
+    select *
     from {{ ref('stg_reservations') }}
 ),
 
 keyed as (
     select
         *,
-        -- payment_key = resolved payment identity. The COALESCE fallback gives a never-resolved payment
-        -- its own stable key from the row id, so it is neither merged with others nor silently dropped.
+        -- resolved payment id, with a stable fallback so an unresolved payment isn't merged or dropped
         coalesce(payment_id, concat('unassigned_', payment_event_id)) as payment_key,
         (payment_id is null) as is_unresolved
     from payments
 ),
 
--- FINAL STATUS = last row per payment. The payment_event_id tiebreak is REQUIRED: same-timestamp rows
--- exist (callback and resolution can share updated_at), and ORDER BY updated_at alone is non-deterministic
--- there — it could pick 'processing' over 'succeeded'. The id tiebreak makes the choice deterministic.
+-- final status = the last row per payment. the id tiebreak matters: callback and resolution can
+-- share updated_at, and without it the sort could land on 'processing' instead of 'succeeded'.
 final_row as (
     select
         payment_key,
@@ -44,7 +37,7 @@ final_row as (
         amount_usd,
         payment_method,
         payment_policy,
-        updated_at as resolved_at        -- resolution time of the final row = the reference other payments' lookback uses
+        updated_at as resolved_at        -- when the payment settled; other payments' 24h check compares to this
     from keyed
     qualify row_number() over (
         partition by payment_key
@@ -53,7 +46,7 @@ final_row as (
 ),
 
 initiation as (
-    -- initiated_at = when the payment STARTED (earliest interaction). Anchor for its OWN 24h window.
+    -- when the payment started — the anchor for its own 24h window
     select
         payment_key,
         min(created_at) as initiated_at
@@ -62,9 +55,8 @@ initiation as (
 ),
 
 reservation_company as (
-    -- Enrich with company_id for company-level metrics (see semantic_layer.md). company_id is stable
-    -- per reservation, so ANY_VALUE is safe. Payments whose reservation never appeared in a snapshot
-    -- get NULL via the LEFT JOIN below (e.g. res_104 / res_107 in the seed).
+    -- company_id for company-level metrics. stable per reservation, so any_value is fine.
+    -- reservations we never saw in a snapshot come back null (e.g. res_104 / res_107).
     select
         reservation_id,
         any_value(company_id) as company_id
@@ -90,16 +82,10 @@ payment_level as (
     left  join reservation_company rc using (reservation_id)
 ),
 
--- 24h PRIOR-FAILED-ATTEMPT flag.
--- TRUE iff another payment on the SAME reservation reached final_status='failed' and RESOLVED within
--- [ this payment's initiated_at - 24h , this payment's initiated_at ).
---   - strict `<` upper bound: prevents self-counting and future leakage — never peek at a failure that
---     resolves at or after this payment starts.
---   - the reference point is the FAILED attempt's OWN resolved_at, not its initiation.
---   - prior.payment_key != cur.payment_key: a payment can never flag itself.
---   - LEFT JOIN + LOGICAL_OR: a payment with no qualifying prior resolves to FALSE (COALESCE of the
---     all-NULL / no-match case). 10x note: this is O(payments-per-reservation^2); fine here, but at
---     scale I'd bound it with a window range or a pre-filtered failed-payments CTE.
+-- true if another payment on the same reservation failed and settled in the 24h before this one
+-- started: prior.resolved_at in [initiated_at - 24h, initiated_at). the strict upper bound keeps it
+-- from counting itself or peeking at a failure that resolves after this payment begins.
+-- self-join is fine at this size; at scale I'd use a range window or a pre-filtered failed CTE.
 final as (
     select
         cur.payment_key,
